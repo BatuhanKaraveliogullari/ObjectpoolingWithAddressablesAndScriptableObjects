@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Assertions;
 using UnityEngine.AddressableAssets;
 using UnityEngine.ResourceManagement.AsyncOperations;
 
@@ -14,7 +15,7 @@ public class Pooler : ScriptableObject
     [SerializeField] private AssetReference pooledAsset;
 
     [Tooltip("Bu asset kullanılmıyorken ne kadar süre sonra release edileceğini gösteren değer. Eğer bulet gibi sık kullanılan bir asset varsa bu süre çok olmalıdır.")]
-    [SerializeField] private float releaseAssetDuration;
+    [Min(1f)] [SerializeField] private int releaseAssetDuration = 1;
 
     private Dictionary<PooledItem,AsyncOperationHandle<GameObject>> instantiatedObjects = new Dictionary<PooledItem,AsyncOperationHandle<GameObject>>();
 
@@ -23,74 +24,89 @@ public class Pooler : ScriptableObject
     private Task releaseTask;
 
     ///<Summary> Position, rotation ve parent önemsenmeksizin spawn işlemi yapılmaktadır.
-    /// Spawn edilecek objenin position değeri 0,0,0 dır, rotation değeri identitydir ve parenti yoktur.. </Summary>
-    public void Spawn()
+    /// Spawn edilecek objenin position değeri 0,0,0 dır, rotation değeri identitydir ve parenti yoktur.. 
+    /// NOTE: Async method içerisinde çağırılır. </Summary>
+    public async Task<PooledItem> Spawn()
     {
         PooledItem pooledItem = GetAvaiableItemInPool();
         if(instantiatedObjects.Count > 0 && pooledItem != null && !pooledItem.gameObject.activeInHierarchy)
         {
             //Release olmayı bekliyen objelerin taski iptal eilecek ve respawn edilecekler.
             Respawn(pooledItem, Vector3.zero, Quaternion.identity, null);
-            return;
+            return pooledItem;
         }
         //Queue daki object active veya queue da object yok.
-        pooledAsset.InstantiateAsync(Vector3.zero, Quaternion.identity, null).Completed += (async) => OnAssetInstantiated(async);
+        pooledItem = await SpawnAsync(Vector3.zero, Quaternion.identity, null);
+        return pooledItem;
+        //pooledAsset.InstantiateAsync(Vector3.zero, Quaternion.identity, null).Completed += (async) => OnAssetInstantiated(async);
     }
 
     ///<Summary> Spawn edilecek objenin sadece parenti bellidir.
-    /// Spawn edilecek objenin position değeri 0,0,0 dır, rotation değeri identitydir. </Summary>
-    public void Spawn(Transform parent)
+    /// Spawn edilecek objenin position değeri 0,0,0 dır, rotation değeri identitydir.
+    /// NOTE: Async method içerisinde çağırılır. </Summary>
+    public async Task<PooledItem> Spawn(Transform parent)
     {
         PooledItem pooledItem = GetAvaiableItemInPool();
         if(instantiatedObjects.Count > 0 && !pooledItem.gameObject.activeInHierarchy)
         {
             //Release olmayı bekliyen objelerin taski iptal eilecek ve respawn edilecekler.
             Respawn(pooledItem, Vector3.zero, Quaternion.identity, parent);
-            return;      
+            return pooledItem;      
         }
 
-        pooledAsset.InstantiateAsync(Vector3.zero, Quaternion.identity, parent).Completed += (async) => OnAssetInstantiated(async);
+        //Queue daki object active veya queue da object yok.
+        pooledItem = await SpawnAsync(Vector3.zero, Quaternion.identity, parent);
+        return pooledItem;
     }
 
     ///<Summary> Position ve rotation değerleriyle spawn işlemi yapılmaktadır. Parent dahil değildir. 
-    /// Obje World de belirtilen postion ve rotaion ile parentsız bir şekilde instantiate edilir. </Summary>
-    public void Spawn(Vector3 position, Quaternion rotation)
+    /// Obje World de belirtilen postion ve rotaion ile parentsız bir şekilde instantiate edilir.
+    /// NOTE: Async method içerisinde çağırılır. </Summary>
+    public async Task<PooledItem> Spawn(Vector3 position, Quaternion rotation)
     {
         PooledItem pooledItem = GetAvaiableItemInPool();
         if(instantiatedObjects.Count > 0 && !pooledItem.gameObject.activeInHierarchy)
         {
             //Release olmayı bekliyen objelerin taski iptal eilecek ve respawn edilecekler.
             Respawn(pooledItem, position, rotation, null);
-            return;
+            return pooledItem;
         }
-
-        pooledAsset.InstantiateAsync(position, rotation, null).Completed += (async) => OnAssetInstantiated(async);
+        //Queue daki object active veya queue da object yok.
+        pooledItem = await SpawnAsync(position, rotation, null);
+        return pooledItem;
     }
 
-    ///<Summary> Spawn edilecek objenin position, rotaion ve parenti bellidir. Oraya spawn edilir. </Summary>
-    public void Spawn(Vector3 position, Quaternion rotation, Transform parent)
+    ///<Summary> Spawn edilecek objenin position, rotaion ve parenti bellidir. Oraya spawn edilir.
+    /// NOTE: Async method içerisinde çağırılır. </Summary>
+    public async Task<PooledItem> Spawn(Vector3 position, Quaternion rotation, Transform parent)
     {
         PooledItem pooledItem = GetAvaiableItemInPool();
         if(instantiatedObjects.Count > 0 && !pooledItem.gameObject.activeInHierarchy)
         {
             //Release olmayı bekliyen objelerin taski iptal eilecek ve respawn edilecekler.
             Respawn(pooledItem, position, rotation, parent);
-            return;
+            return pooledItem;
         }
+        //Queue daki object active veya queue da object yok.
+        pooledItem = await SpawnAsync(position, rotation, parent);
+        return pooledItem;
+    }
 
-        pooledAsset.InstantiateAsync(position, rotation, parent).Completed += (async) => OnAssetInstantiated(async);
+    private async Task<PooledItem> SpawnAsync(Vector3 position, Quaternion rotation, Transform parent)
+    {
+        AsyncOperationHandle<GameObject> aws = pooledAsset.InstantiateAsync(position, rotation, parent);
+        Task asd = aws.Task;
+        await asd;
+        OnAssetInstantiated(aws);
+        return aws.Result.GetComponent<PooledItem>();
     }
 
     ///<Summary> Spawn işlemi bittikten sonra çağırılacak fonksiyon.
     /// Spawn edildikten sonra instantiatedObject listesine dahil etme işlemi gerçekleştirilir. </Summary>
     private void OnAssetInstantiated(AsyncOperationHandle<GameObject> handle)
     {
-        if (handle.Result.GetComponent<PooledItem>() == null)
-        {
-            Debug.LogError("PooledItem which is in addressables does not have PooledItem component");
-            return;
-        }
-
+        Assert.IsNotNull(handle.Result, "PooledItem which is in addressables does not have PooledItem component");
+        if (handle.Result.GetComponent<PooledItem>() == null) return;
         instantiatedObjects.Add(handle.Result.GetComponent<PooledItem>(),handle);
         cancellationTokenSources.Add(handle.Result.GetComponent<PooledItem>(),new CancellationTokenSource());
         handle.Result.GetComponent<PooledItem>().onReturnToPool += ReturnToPool;
@@ -120,6 +136,24 @@ public class Pooler : ScriptableObject
     private PooledItem GetAvaiableItemInPool()
     {
         List<AsyncOperationHandle<GameObject>> tempList = instantiatedObjects.Values.ToList();
+
+        if(tempList.Count > 0)
+        {
+            if(tempList[0].IsValid())
+            {
+                if(tempList[0].Result == null)
+                {
+                    ClearPoolEntirely();
+                    return null;
+                }
+            }
+            else
+            {
+                ClearPoolEntirely();
+                return null;
+            }
+        }
+
         foreach(AsyncOperationHandle<GameObject> pooledItem in tempList)
         {
             if(!pooledItem.Result.activeInHierarchy)
@@ -131,7 +165,7 @@ public class Pooler : ScriptableObject
         return null;
     }
 
-    ///<Summary> Bu method objenin poola dönmesini ve eğer ihtiyaç duyulmaz ise tamamen bundleına gönderilmesini sağlar. </Summary>
+     ///<Summary> Bu method objenin poola dönmesini ve eğer ihtiyaç duyulmaz ise tamamen bundleına gönderilmesini sağlar. </Summary>
     private void ReturnToPool(PooledItem itemToReturn)
     {
         itemToReturn.gameObject.SetActive(false);
@@ -143,42 +177,51 @@ public class Pooler : ScriptableObject
     /// Eğer bu thread de yapılan işlemleri cancel edecek bir durum oluşursa bu method yarım kalacaktır. </Summary>
     private async Task ReleaseAsset(PooledItem itemToReturn, CancellationToken cancellationToken)
     {
-        Debug.Log("ReleaseAsset");
         try
         {
-            Debug.Log("TryRelease");
-            await Task.Run(() => WaitForRelease(5f,cancellationToken));
+            await Task.Run(() => WaitForRelease(releaseAssetDuration,cancellationToken));
 
             Addressables.Release(instantiatedObjects[itemToReturn]);
 
-            instantiatedObjects.Remove(itemToReturn);
+            Debug.Log(itemToReturn.name + " released");
 
-            cancellationTokenSources.Remove(itemToReturn);
+            ClearAsset(itemToReturn);
         }
         catch(OperationCanceledException)
         {
-            Debug.Log("TaskCanceledException");
+            Debug.Log(itemToReturn.name + "'s release canceled to reusage");
         }
     }
 
     ///<Summary> Bu method assetin veya poollanan objenin bundleına gönderilmesi için gereken bekleme süresini hesap etmektedir. </Summary>
     private void WaitForRelease(float duration, CancellationToken token)
     {
-        Debug.Log("waitForRelease");
+        Debug.Log("Asset will release after " + duration + " seconds");
         for(int i = 0; i < duration; i++)
         {
             Thread.Sleep(1000);
-            Debug.Log("Releasing");
+            
             if(token.IsCancellationRequested) 
             {
                 token.ThrowIfCancellationRequested();
             }
         }
     }
- 
-    private void OnDisable() 
+
+    private void ClearPoolEntirely()
     {
         instantiatedObjects.Clear();
         cancellationTokenSources.Clear();
+    }
+
+    private void ClearAsset(PooledItem pooledItem)
+    {
+        instantiatedObjects.Remove(pooledItem);
+        cancellationTokenSources.Remove(pooledItem);
+    }
+ 
+    private void OnDisable() 
+    {
+        ClearPoolEntirely();
     }
 } 
